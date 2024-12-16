@@ -1,0 +1,266 @@
+version: "2"
+
+name: VAR Microbenchmark ReUse NoTime (Dev)
+
+id: "255255"
+
+summary: |
+  Measures peak burst performance of random reads, random writes, sequential
+  reads, and sequential writes
+
+estimated_runtime: 20m
+
+images_allowed:
+  - ubuntu
+  - windowsServer
+
+target_types_allowed:
+  - onprem_vm
+  - onprem_container
+  - cloud_vm
+  - cloud_container
+
+variables:
+- name: runtime_secs
+  display_name: "Runtime (seconds)"
+  description: Defines the length of the measurement period for each workload.
+  integer:
+    default_value: 60
+    minimum_value: 1
+- name: data_compression
+  display_name: "Data Compressibility (buffer_compress_percentage)" 
+  description: |
+    Specify the compressibility of the data being tested in the benchmark. 
+    The 'buffer_compress_percentage' parameter controls the level of data 
+    compression applied during WRITE operations
+  integer:
+    default_value: 75
+    minimum_value: 0
+    maximum_value: 100
+- name: _warmup_secs
+  display_name: "Warm Up (seconds)"
+  description: Defines the length of the warm up period for each workload.
+  integer:
+    default_value: 20
+    minimum_value: 1
+- name: _cooldown_secs
+  display_name: "Cool Down (seconds)"
+  description: Defines the length of the cool down period for each workload.
+  integer:
+    default_value: 20
+    minimum_value: 1
+- name: _break_period_secs
+  display_name: "Break period (seconds)"
+  description: Defines the length of the break between workloads.
+  integer:
+    default_value: 60
+    minimum_value: 1
+
+{%- set scalar_results_group_name = "Power Metrics" %}
+
+vm_groups:
+- name: group_0
+  template: default
+  vcpu_count: 4
+  ram: 4g
+  count_per_node: 1
+
+workloads:
+- name: Random Read Warmup
+  fio:
+    vm_group: group_0
+    jobfiles:
+    - random_read.fio
+- name: Random Read
+  fio:
+    vm_group: group_0
+    jobfiles:
+    - random_read.fio
+- name: Sequential Read
+  fio:
+    vm_group: group_0
+    jobfiles:
+    - sequential_read.fio
+- name: Random Write
+  fio:
+    vm_group: group_0
+    jobfiles:
+    - random_write.fio
+    template_variables:
+      compression: {{ data_compression }}
+- name: Sequential Write
+  fio:
+    vm_group: group_0
+    jobfiles:
+    - sequential_write.fio
+    template_variables:
+      compression: {{ data_compression }}
+
+results:
+- name: Random Read IOPS
+  vm_group:
+    vm_group: group_0
+    metric: iops
+    aggregation: sum
+    phases:
+    - Random Read
+- name: Sequential Read I/O Throughput
+  vm_group:
+    vm_group: group_0
+    metric: bytes_per_second
+    aggregation: sum
+    phases:
+    - Sequential Read
+- name: Random Write IOPS
+  vm_group:
+    vm_group: group_0
+    metric: iops
+    aggregation: sum
+    phases:
+    - Random Write
+- name: Sequential Write I/O Throughput
+  vm_group:
+    vm_group: group_0
+    metric: bytes_per_second
+    aggregation: sum
+    phases:
+    - Sequential Write
+- name: Total Test Runtime(mins)
+  scalar:
+    type: total_power_time
+    group: {{ scalar_results_group_name }}
+    phases:
+    - Random Read
+    - Sequential Read
+    - Random Write
+    - Sequential Write
+- name: Total Energy Usage(kWh)
+  scalar:
+    type: total_energy_used
+    group: {{ scalar_results_group_name }}
+    phases:
+    - Random Read
+    - Sequential Read
+    - Random Write
+    - Sequential Write
+- name: Cluster CPU Usage
+  hypervisor:
+    metric: CpuUsage.Avg.Megahertz
+    aggregation: sum
+    phases:
+    - Random Read
+    - Sequential Read
+    - Random Write
+    - Sequential Write
+- name: Cluster Power Usage
+  hypervisor:
+    metric: PowerConsumed.Avg.Watts
+    aggregation: sum
+    phases:
+    - Random Read
+    - Sequential Read
+    - Random Write
+    - Sequential Write
+
+phases:
+- name: Setup
+  steps:
+  - name: vm_group.Start
+    args:
+      vm_group_name: group_0
+  - name: playbook.Run
+    args:
+      filename: delete_command_logs.yaml
+      inventory:
+        - group_0
+      remote_user: nutanix
+      remote_pass: nutanix/4u
+  - name: vm_group.ShutDown
+    args:
+      vm_group_name: group_0
+  - name: vm_group.Start
+    args:
+      vm_group_name: group_0
+  - name: workload.Start
+    args:
+      workload_name: Random Read Warmup
+      runtime_secs: 60
+
+- name: Random Read
+  steps:
+  - name: test.Annotate
+    args:
+      message: "Random Read: Started workload"  
+  - name: workload.Start
+    args:
+      workload_name: Random Read
+      async: False
+      timeout_secs: {{ 3600 }}
+  - name: test.Annotate
+    args:
+      message: "Random Read: Finished workload"
+
+
+- name: Break 1
+  steps:
+  - name: test.Wait
+    args:
+      duration_secs: {{ _break_period_secs }}
+
+- name: Sequential Read
+  steps:
+  - name: test.Annotate
+    args:
+      message: "Sequential Read: Started workload"
+  - name: workload.Start
+    args:
+      workload_name: Sequential Read
+      async: False
+      timeout_secs: {{ 3600 }}      
+  - name: test.Annotate
+    args:
+      message: "Sequential Read: Finished workload"
+
+- name: Break 2
+  steps:
+  - name: test.Wait
+    args:
+      duration_secs: {{ _break_period_secs }}
+
+- name: Random Write
+  steps:
+  - name: test.Annotate
+    args:
+      message: "Random Write: Started workload"
+  - name: workload.Start
+    args:
+      workload_name: Random Write
+      async: False
+      timeout_secs: {{ 3600 }}      
+  - name: test.Annotate
+    args:
+      message: "Random Write: Finished workload"
+
+- name: Break 3
+  steps:
+  - name: test.Wait
+    args:
+      duration_secs: {{ _break_period_secs }}
+
+- name: Sequential Write
+  steps:
+  - name: test.Annotate
+    args:
+      message: "Sequential Write: Started workload"
+  - name: workload.Start
+    args:
+      workload_name: Sequential Write
+      async: False
+      timeout_secs: {{ 3600 }}      
+  - name: test.Annotate
+    args:
+      message: "Sequential Write: Finished workload"
+
+- name: Teardown
+  steps:
+  - name: test.CollectCurieVMLogs

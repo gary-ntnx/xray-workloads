@@ -1,0 +1,8 @@
+---
+
+- name: Delete Command Logs
+  hosts: all
+  become: true
+  tasks:
+    - name: Remove all command logs
+      shell: "rm -rf /home/nutanix/charon/agent/cmds/*"
